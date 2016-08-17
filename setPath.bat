@@ -1,0 +1,1 @@
+set Path=%PATH%;E:\MyProjects\pluralsight-gulp-master\node_modules\.bin;E:\MyProjects\pluralsight-gulp-master\node_modules\eslint-config-angular;E:\MyProjects\pluralsight-gulp-master\node_modules\eslint\bin;E:\MyProjects\pluralsight-gulp-master\node_modules\eslint
