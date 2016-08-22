@@ -1,6 +1,6 @@
 @echo off
 
-set AddPath=E:\MyProjects\pluralsight-gulp-master\node_modules\.bin;E:\MyProjects\pluralsight-gulp-master\node_modules\eslint-config-angular;E:\MyProjects\pluralsight-gulp-master\node_modules\eslint\bin;E:\MyProjects\pluralsight-gulp-master\node_modules\eslint
+set AddPath=E:\MyProjects\gulp-angularjs\node_modules\.bin;E:\MyProjects\gulp-angularjs\node_modules\eslint-config-angular;E:\MyProjects\gulp-angularjs\node_modules\eslint\bin;E:\MyProjects\gulp-angularjs\node_modules\eslint
 
 set Found=N
 REM for %%A in ("%PATH:;=","%") do if /i "%%~A" EQU "%AddPath%" set Found=Y

@@ -2,7 +2,9 @@
     "env": {
         "browser": true,
         "commonjs": false,
-        "node": true
+        "node": true,
+        "mocha": true,
+        "qunit": true
     },
     "extends": ["eslint:recommended", "angular"],
     "rules": {
@@ -36,5 +38,25 @@
         "angular/log": [
             0
         ]
+    },
+    "globals": {
+        "$compile": true,
+        "$controller": true,
+        "$httpBackend": true,
+        "$httpFlush": true,
+        "$location": true,
+        "$log": true,
+        "$rootScope": true,
+        "$state": true,
+        "$stateParams": true,
+        "$templateCache": true,
+        "$timeout": true,
+        "$q": true,
+        "bard": true,
+        "inject": true,
+        "dataservice": true,
+        "mockData": true,
+        "customers": true,
+        "sinon": true
     }
 }

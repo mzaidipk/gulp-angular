@@ -6,6 +6,8 @@ var args = require('yargs').argv; // plugin for supplying command line arguments
 var browserSync = require('browser-sync');
 var config = require('./gulp.config')(); // execute to get the value load
 var del = require('del');
+var path = require('path');
+var _ = require('lodash');
 var $ = require('gulp-load-plugins')({lazy: true}); //lazy load plugins as used
 var port = process.env.PORT || config.defaultPort;
 
@@ -197,10 +199,68 @@ gulp.task('inject', ['wiredep', 'styles', 'templatecache'], function () {
 });
 
 /**
+ * will call optimize for build folder and copy images and fonts
+ */
+gulp.task('build', ['optimize', 'images', 'fonts'], function () {
+	log('Building everything');
+
+    var msg = {
+        title: 'gulp build',
+        subtitle: 'Deployed to the build folder',
+        message: 'Running `gulp serve-build`'
+    };
+    del(config.temp);
+    log(msg);
+    notify(msg);
+});
+
+/**
+ * build the specs and run tests in server. 
+ */
+gulp.task('serve-specs', ['build-specs'], function(done) {
+    log('run the spec runner');
+    serve(true /* isDev */, true /* specRunner */);
+    done();
+});
+
+/**
+ * this will inject all dependencies into the spec html file
+ * inject wiredep dependencies
+ * inject test libraries
+ * inject all js files
+ * inject test helpers like polyfill, mockdata
+ * inject all tests
+ * inject all angulat templatesCaches
+ */
+gulp.task('build-specs', ['templatecache'], function() {
+    log('building the spec runner');
+
+    var wiredep = require('wiredep').stream;
+    var options = config.getWiredepDefaultOptions();
+    var specs = config.specs;
+
+    options.devDependencies = true;
+
+    if (args.startServers) {
+        specs = [].concat(specs, config.serverIntegrationSpecs);
+    }
+
+    return gulp
+        .src(config.specRunner)
+        .pipe(wiredep(options))
+        .pipe($.inject(gulp.src(config.testlibraries,{read: false}), {name: 'inject:testlibraries'}))
+        .pipe($.inject(gulp.src(config.js)))
+        .pipe($.inject(gulp.src(config.specHelpers, {read: false}), {name: 'inject:spechelpers'}))
+        .pipe($.inject(gulp.src(specs, {read: false}), {name: 'inject:specs'}))
+        .pipe($.inject(gulp.src(config.temp + config.templateCache.file, {read: false}), {name: 'inject:templates'}))
+        .pipe(gulp.dest(config.client));
+});
+
+/**
  * optimizing the javascript, css, html for build
  * inject templateCache in the html
  */
-gulp.task('optimize', ['inject'], function () {
+gulp.task('optimize', ['inject', 'test'], function () {
 	log('optimizating the javascript, css, html');
 	var templateCache = config.temp + config.templateCache.file;
 	var assets = $.useref({searchPath: './'});
@@ -214,7 +274,59 @@ gulp.task('optimize', ['inject'], function () {
 			starttag: '<!-- inject:templates:js -->'
 		}))
 		.pipe(assets)
+		// use cooments '/* @ngInject */' in code for ngAnnotate to work 
+		// angular injection will be applied like this for using dependent service useage like below
+		// --code-- ready.$inject = ['dataservice'];
+		.pipe($.if('*.js', $.ngAnnotate()))
+		.pipe($.if('*.js', $.uglify()))
+		.pipe($.if('*.js',$.rev())) // app.js --> app-1j8889jr.js
+		.pipe($.if('*.css',$.csso()))
+		.pipe($.if('*.css',$.rev()))
+		.pipe($.revReplace())
+		.pipe(gulp.dest(config.build))
+		.pipe($.rev.manifest())
 		.pipe(gulp.dest(config.build));
+});
+
+/**
+ * Bump the version
+ * --type=pre will bump the prerelease version *.*.*-x
+ * --type=patch or no flag will bump the patch version *.*.x
+ * --type=minor will bump the minor version *.x.*
+ * --type=major will bump the major version x.*.*
+ * --version=1.2.3 will bump to a specific version and ignore other flags
+ */
+gulp.task('bump' , function () {
+	var msg = 'Bumping versions';
+	var type =  args.type;
+	var version = args.version;
+	var options = {};
+	if(version)
+	{
+		options.version = version;
+		msg += ' to ' + version;
+	}
+	else {
+		options.type = type;
+		msg += ' for a ' + type;
+	}
+	log(msg);
+
+	return gulp
+		.src(config.packages)
+		.pipe($.print())
+		.pipe($.bump(options))
+		.pipe(gulp.dest(config.root));
+
+});
+
+/**
+ * start the App by Cranking up node server using express
+ * will start browserSync automatically once server is Started 
+ * this task is dependent upon build
+ */
+gulp.task('serve-build', ['build'], function(){
+	serve(false /* isDev */);
 });
 
 /**
@@ -223,36 +335,7 @@ gulp.task('optimize', ['inject'], function () {
  * this task is dependent upon inject
  */
 gulp.task('serve-dev', ['inject'], function(){
-	var isDev = true;
-
-	var nodeOptions = {
-		script: config.nodeServer,
-		delayTime: 1, //1 sec
-		env: {
-			'PORT' : port,
-			'NODE_ENV': isDev ? 'dev' : 'build'
-		},
-		watch: [config.server]
-	};
-	return $.nodemon(nodeOptions)
-			.on('restart', function(ev){
-				log('*** nodemon restarted ***');
-				log('files changed on restart: \n' + ev);
-				setTimeout(function () {
-					browserSync.notify('reloading now ...');
-					browserSync.reload({stream: false});
-				}, config.browserReloadDelay);
-			})
-			.on('start', function(){
-				log('*** nodemon Started ***');
-				startBrowserSync();
-			})
-			.on('crash', function(){
-				log('*** nodemon Crashed: script crahsed for some reason ***');
-			})
-			.on('exit', function(){
-				log('*** nodemon exited cleanly ***');
-			});
+	serve(true /* isDev */);
 });
 
 /**
@@ -278,34 +361,102 @@ gulp.task('templatecache', ['clean-code'], function(){
 				.pipe(gulp.dest(config.temp));
 });
 
+/**
+ * this will start angular tests one time only
+ * if argument --startServers passed will start server integration tests which will hit mock API's
+ * depends upon es-lint and templatecache
+ */
+gulp.task('test', ['es-lint', 'templatecache'], function (done) {
+	startTests(true /* singleRun*/, done);
+});
 
-
+/**
+ * this will continously keep testing angular files
+ * depends upon es-lint and templatecache 
+ */
+gulp.task('autotest', ['es-lint', 'templatecache'], function (done) {
+	startTests(false /* singleRun*/, done);
+});
 
 ///////
+
+function serve(isDev, specRunner) {
+
+	var nodeOptions = {
+		script: config.nodeServer,
+		delayTime: 1, //1 sec
+		env: {
+			'PORT' : port,
+			'NODE_ENV': isDev ? 'dev' : 'build'
+		},
+		watch: [config.server]
+	};
+	return $.nodemon(nodeOptions)
+			.on('restart', function(ev){
+				log('*** nodemon restarted ***');
+				log('files changed on restart: \n' + ev);
+				setTimeout(function () {
+					browserSync.notify('reloading now ...');
+					browserSync.reload({stream: false});
+				}, config.browserReloadDelay);
+			})
+			.on('start', function(){
+				log('*** nodemon Started ***');
+				startBrowserSync(isDev, specRunner);
+			})
+			.on('crash', function(){
+				log('*** nodemon Crashed: script crahsed for some reason ***');
+			})
+			.on('exit', function(){
+				log('*** nodemon exited cleanly ***');
+			});
+}
 
 function changeEvent(event) {
 	var srcPattern = new RegExp('/.*(?=/' + config.source + ')/');
 	log('File ' + event.path.replace(srcPattern, '') + ' ' + event.type);
 }
 
-function startBrowserSync() {
+function notify(options) {
+    var notifier = require('node-notifier');
+    var notifyOptions = {
+        sound: 'Bottle',
+        contentImage: path.join(__dirname, 'gulp.png'),
+        icon: path.join(__dirname, 'gulp.png')
+    };
+    _.assign(notifyOptions, options);
+    notifier.notify(notifyOptions);
+}
+
+function startBrowserSync(isDev, specRunner) {
 	if(args.nosync || browserSync.active){ // do nothing if CLI passed --nosync or is already active
 		return;
 	}
 	log('Starting browser-sync on port ' + port);
 
-	gulp.watch([config.less], ['styles'])
-		.on('change', function (event) {
-			changeEvent(event);
-		});
+	if(isDev)
+	{
+		// watch for less only
+		gulp.watch([config.less], ['styles'])
+			.on('change', function (event) {
+				changeEvent(event);
+			});
 
-	gulp.watch(
-		[	
-			config.client + '**/*.*',
-			'!' + config.less
-		])
-		.on('change', browserSync.reload);
-
+		// watch for everything else
+		gulp.watch(
+			[	
+				config.client + '**/*.*',
+				'!' + config.less
+			])
+			.on('change', browserSync.reload);
+	}
+	else
+	{
+		gulp.watch([config.less, config.js, config.html], ['optimize', browserSync.reload])
+			.on('change', function (event) {
+				changeEvent(event);
+			});
+	}
 	var options = {
 		proxy:  'localhost:' + port,
 		port: 3000,
@@ -332,7 +483,51 @@ function startBrowserSync() {
 		reloadDelay: 1000 // 1 sec
 	};
 
+	if(specRunner){
+		options.startPath = config.specRunnerFile;
+	}
+
 	browserSync(options);	
+}
+
+function startTests(singleRun, done) {
+	var child;
+	var fork = require('child_process').fork;
+	var karmaServer = require('karma').Server;
+	var excludeFiles = [];
+	var serverSpecs = config.serverIntegrationSpecs;
+	
+	if(args.startServers){
+		log('Starting server');
+		var savedEnv = process.env;
+		savedEnv.NODE_ENV = 'dev';
+		savedEnv.port = 8888;
+		child = fork(config.nodeServer);
+	} else{
+		if(serverSpecs && serverSpecs.length){
+			excludeFiles = serverSpecs;
+		}
+	}
+
+	new karmaServer({
+		configFile: __dirname + '/karma.conf.js',
+		exclude: excludeFiles,
+		singleRun: !!singleRun
+	}, karmaCompleted).start();
+
+	function karmaCompleted(karmaResult) {
+		log('karma Completed');
+		if(child){
+			log('Shutting down the child process');
+			child.kill();
+		}
+		if(karmaResult === 1){
+			done('karma: tests failed with code '+ karmaResult);
+		} else {
+			done();
+		}
+		
+	}
 }
 
 function errorLogger (error) {

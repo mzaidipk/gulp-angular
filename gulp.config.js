@@ -1,10 +1,14 @@
 module.exports = function(){
     // variable to reuse source client
+    var root = './';
     var client = './src/client/';
     var clientApp = client + 'app/';
     var temp = './.tmp/';
+    var report = './report/';
     var server = './src/server/';
-
+    var specRunnerFile = 'specs.html';
+    var wiredep = require('wiredep');
+    var bowerFiles = wiredep({devDependencies: true})['js']; 
     var config = {
         /**
          * File paths
@@ -19,15 +23,18 @@ module.exports = function(){
         client: client,
         css: temp + 'styles.css',
         fonts: './bower_components/font-awesome/fonts/**/*.*',
+        html: clientApp  + '/**/*.html',
         htmlTemplates: clientApp + '**/*.html',
         images: client + 'images/**/*.*',
         index: client + 'index.html',
         js: [
             clientApp + '**/*.module.js', // get modules first
             clientApp + '**/*.js', // get remaining js files
-            '!' + clientApp + '**.*.spec.js'
+            '!' + clientApp + '**/*.spec.js'
         ],
         less:  client + 'styles/styles.less',
+        report: report,
+        root: root,
         server: server,
         temp: temp,
         /**
@@ -53,6 +60,29 @@ module.exports = function(){
             directory: './bower_components',
             ignorePath: '../..'
         },
+        packages: [
+            './package.json',
+            './bower.json'
+        ],
+
+        /**
+         * specs.html, our HTML spec runner
+         */
+        specRunner: client + specRunnerFile,
+        specRunnerFile: specRunnerFile,
+        testlibraries: [
+           'node_modules/mocha/mocha.js',
+           'node_modules/chai/chai.js',
+           'node_modules/mocha-clean/index.js',
+           'node_modules/sinon-chai/lib/sinon-chai.js'
+        ],
+        specs: [clientApp + '**/*.spec.js'],
+
+        /**
+         * Karma and testing settings
+         */
+        specHelpers: [client + 'test-helpers/*.js'],
+        serverIntegrationSpecs: [client + 'tests/server-integration/**/*.spec.js'],
 
         /**
          * Node Settings
@@ -67,9 +97,37 @@ module.exports = function(){
             directory: config.bower.directory,
             ignorePath: config.bower.ignorePath
         };
-
         return options;
     };
+    
+    config.karma = getKarmaOtions();
 
     return config;
+    
+    ////////
+
+    function getKarmaOtions() {
+        var options = {
+            files: [].concat(
+                bowerFiles, 
+                config.specHelpers,
+                client + '**/*.module.js',
+                client + '**/*.js',
+                temp + config.templateCache.file,
+                config.serverIntegrationSpecs
+            ),
+            exclue: [],
+            coverage: {
+                dir: report + 'coverage',
+                reporters: [
+                    {type: 'html', subdir: 'report-html'},
+                    {type: 'lcov', subdir: 'report-lcov'},
+                    {type: 'text-summary'},
+                ]
+            },
+            preprocessors: {}
+        };
+        options.preprocessors[clientApp + '**/!(*.spec)+(.js)'] = ['coverage'];
+        return options;
+    }
 };
